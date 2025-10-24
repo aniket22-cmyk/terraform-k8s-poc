@@ -24,6 +24,7 @@ resource "aws_instance" "k8s_node" {
               sudo -u ubuntu minikube start --driver=none --kubernetes-version=v1.27.0
               chown -R ubuntu:ubuntu /home/ubuntu/.kube /home/ubuntu/.minikube
               mkdir -p /home/ubuntu/app
+              chown -R ubuntu:ubuntu /home/ubuntu/app
               EOF
 
   vpc_security_group_ids = [aws_security_group.k8s_sg.id]
