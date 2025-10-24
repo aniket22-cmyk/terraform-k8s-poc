@@ -111,18 +111,25 @@ jobs:
           HOST="${{ steps.get-ip.outputs.ip }}"
           echo "⏳ Waiting for Minikube to be ready (kubeconfig to appear)..."
           # Wait for kubeconfig to exist
-          for i in {1..25}; do
+          for i in {1..60}; do
             if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 ubuntu@$HOST "test -f /home/ubuntu/.kube/config"; then
               echo "✅ kubeconfig found!"
               break
             fi
-            echo "⏳ kubeconfig not ready yet (attempt $i/25)..."
-            sleep 12
+            # Show user-data logs for debugging
+            if [ $((i % 10)) -eq 0 ]; then
+              echo "checking setup progress..."
+              ssh -o StrictHostKeyChecking=no ubuntu@$HOST "tail -20 /var/log/user-data.log" || true
+            fi
+
+            echo "waiting....(attempt $i/60)"
+            sleep 10
           done
 
           # Double-check: if still missing, fail
           if ! ssh -o StrictHostKeyChecking=no ubuntu@$HOST "test -f /home/ubuntu/.kube/config"; then
-            echo "❌ kubeconfig never appeared after 5 minutes!"
+            echo "minikube setup failed!"
+            ssh -o StrictHostKeyChecking=no ubuntu@$HOST "cat /var/log/user-data.log"
             exit 1
           fi
           # Fetch and deploy
