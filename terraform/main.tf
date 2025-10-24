@@ -178,7 +178,7 @@ resource "aws_instance" "k8s_node" {
               chown -R ubuntu:ubuntu /home/ubuntu
 
               echo "=== Launching Minikube as ubuntu user ==="
-              runuser -u ubuntu bash -c "
+              sudo -i -u ubuntu bash -c "
                 set -euxo pipefail
                 export HOME=/home/ubuntu
                 export MINIKUBE_HOME=\$HOME/.minikube
