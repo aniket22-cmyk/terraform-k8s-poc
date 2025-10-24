@@ -192,7 +192,7 @@ echo "=== Starting setup at $(date) ==="
 
 # Install dependencies
 apt-get update
-apt-get install -y python3 curl conntrack socat apt-transport-https ca-certificates gnupg lsb-release docker.io
+apt-get install -y python3 curl conntrack socat apt-transport-https ca-certificates gnupg lsb-release docker.io jq
 
 systemctl enable docker
 systemctl start docker
@@ -225,37 +225,17 @@ export KUBECONFIG=$HOME/.kube/config
 mkdir -p $MINIKUBE_HOME $HOME/.kube
 
 echo "Starting Minikube with docker driver..."
-minikube start --driver=docker --kubernetes-version=v1.28.0 --memory=2048 --wait=all
+minikube start --driver=docker --kubernetes-version=v1.28.0 --memory=2048 --apiserver-ips=127.0.0.1 --apiserver-name=localhost --wait=all
 
 echo "Verifying cluster..."
-kubectl cluster-info || true
-kubectl get nodes || true
-
-# Wait a moment for everything to settle
-sleep 5
-
-# Ensure cert directory exists
-mkdir -p $HOME/.minikube/profiles/minikube
-
-echo "Extracting certificates from kubeconfig..."
-# Extract certificates - docker driver embeds them in kubeconfig
-kubectl config view --raw -o jsonpath='{.users[?(@.name=="minikube")].user.client-certificate-data}' | base64 -d > $HOME/.minikube/profiles/minikube/client.crt
-kubectl config view --raw -o jsonpath='{.users[?(@.name=="minikube")].user.client-key-data}' | base64 -d > $HOME/.minikube/profiles/minikube/client.key
-kubectl config view --raw -o jsonpath='{.clusters[?(@.name=="minikube")].cluster.certificate-authority-data}' | base64 -d > $HOME/.minikube/ca.crt
-
-# Verify files were created
-ls -lah $HOME/.minikube/profiles/minikube/client.crt
-ls -lah $HOME/.minikube/profiles/minikube/client.key
-ls -lah $HOME/.minikube/ca.crt
-
-chmod 600 $HOME/.minikube/profiles/minikube/client.key
-chmod 644 $HOME/.minikube/profiles/minikube/client.crt
-chmod 644 $HOME/.minikube/ca.crt
-chown -R ubuntu:ubuntu $MINIKUBE_HOME $HOME/.kube
+kubectl cluster-info
+kubectl get nodes
 
 echo "Waiting for Kubernetes system pods..."
 kubectl wait --for=condition=Ready pods --all --all-namespaces --timeout=300s || true
 kubectl get pods --all-namespaces
+
+chown -R ubuntu:ubuntu $MINIKUBE_HOME $HOME/.kube
 
 echo "✅ Minikube setup complete"
 EOT
