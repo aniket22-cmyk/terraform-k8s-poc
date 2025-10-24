@@ -1,0 +1,58 @@
+name: Deploy to EC2 Kubernetes
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: ./terraform
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
+        working-directory: ./terraform
+        env:
+          TF_VAR_key_name: ${{ secrets.EC2_KEY_NAME }}
+
+      - name: Get EC2 Public IP
+        id: get-ip
+        run: |
+          IP=$(terraform output -raw ec2_public_ip)
+          echo "ip=$IP" >> $GITHUB_OUTPUT
+        working-directory: ./terraform
+
+      - name: Setup SSH Key
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan ${{ steps.get-ip.outputs.ip }} >> ~/.ssh/known_hosts
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Copy App to EC2
+        run: |
+          sleep 180
+          scp -o StrictHostKeyChecking=no app.py ubuntu@${{ steps.get-ip.outputs.ip }}:/home/ubuntu/app/app.py
+
+      - name: Deploy to Kubernetes
+        run: |
+          scp -o StrictHostKeyChecking=no ubuntu@${{ steps.get-ip.outputs.ip }}:/home/ubuntu/.kube/config ~/.kube/config
+          kubectl apply -f k8s/deployment.yaml
