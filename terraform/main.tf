@@ -54,8 +54,8 @@ resource "aws_instance" "k8s_node" {
               echo "Starting Minikube..."
               minikube start \
                 --driver=docker \
-                --kubernetes-version=v1.27.0 \
-                --force \
+                --kubernetes-version=v1.28.0 \
+                --memory=2048 \
                 --wait=all
 
               echo "Verifying Minikube status..."
