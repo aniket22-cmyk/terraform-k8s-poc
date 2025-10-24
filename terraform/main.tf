@@ -63,7 +63,7 @@ resource "aws_instance" "k8s_node" {
                   break
                 fi
                 echo "Waiting for kubeconfig files... ($i/30)"
-                sleep
+                sleep 10
               done
               echo "Waiting for Kubernetes system pods..."
               kubectl wait --for=condition=Ready pods --all --all-namespaces --timeout=300s || true
