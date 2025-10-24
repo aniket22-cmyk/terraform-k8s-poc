@@ -205,9 +205,41 @@ resource "aws_instance" "k8s_node" {
               kubectl get nodes -o wide
               '
             EOF
-
+  vpc_security_group_ids = [aws_security_group.k8s_sg.id]
   tags = {
     Name = "minikube-ec2"
+  }
+}
+resource "aws_security_group" "k8s_sg" {
+  name        = "k8s-minikube-sg"
+  description = "Allow SSH and app ports"
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 8443
+    to_port     = 8443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 30000
+    to_port     = 32767
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 }
 
