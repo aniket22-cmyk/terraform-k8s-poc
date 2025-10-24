@@ -1,6 +1,6 @@
 apiVersion: apps/v1
 kind: Deployment
-meta
+meta:
   name: dummy-app
 spec:
   replicas: 1
