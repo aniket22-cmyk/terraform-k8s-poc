@@ -46,27 +46,43 @@ resource "aws_instance" "k8s_node" {
               sudo -u ubuntu -i bash <<'INNER_EOF'
               set -euxo pipefail
               export HOME=/home/ubuntu
+              export MINIKUBE_HOME=/home/ubuntu/.minikube
+              export KUBECONFIG=/home/ubuntu/.kube/config
 
-              # Start Minikube using Docker driver (v1.27.0)
-              minikube start --driver=docker --kubernetes-version=v1.27.0 --force --wait=all
+              mkdir -p $MINIKUBE_HOME $HOME/.kube
+
+              echo "Starting Minikube..."
+              minikube start \
+                --driver=docker \
+                --kubernetes-version=v1.27.0 \
+                --force \
+                --wait=all
 
               echo "Verifying Minikube status..."
-              minikube status
-              # Wait until kubeconfig and certificates exist
+              minikube status || true
+
+              # Wait for certs and kubeconfig
               echo "Waiting for Minikube kubeconfig and certs to be ready..."
-              for i in {1..30}; do
-                if [[ -f "$HOME/.minikube/profiles/minikube/client.crt" && \
-                      -f "$HOME/.minikube/profiles/minikube/client.key" && \
-                      -f "$HOME/.minikube/ca.crt" && \
-                      -s "$HOME/.kube/config" ]]; then
+              for i in {1..60}; do
+                if [[ -f "$MINIKUBE_HOME/profiles/minikube/client.crt" && \
+                      -f "$MINIKUBE_HOME/profiles/minikube/client.key" && \
+                      -f "$MINIKUBE_HOME/ca.crt" && \
+                      -s "$KUBECONFIG" ]]; then
                   echo "✅ Minikube kubeconfig and certs are ready."
                   break
                 fi
-                echo "Waiting for kubeconfig files... ($i/30)"
+                echo "Waiting for kubeconfig files... ($i/60)"
                 sleep 10
               done
+
+              echo "Fixing kubeconfig context paths..."
+              minikube update-context
+
               echo "Waiting for Kubernetes system pods..."
               kubectl wait --for=condition=Ready pods --all --all-namespaces --timeout=300s || true
+
+              echo "Verifying cluster..."
+              kubectl get nodes || true
 
               echo "=== Minikube setup complete ==="
               INNER_EOF
