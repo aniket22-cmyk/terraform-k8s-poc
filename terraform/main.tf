@@ -227,21 +227,28 @@ mkdir -p $MINIKUBE_HOME $HOME/.kube
 echo "Starting Minikube with docker driver..."
 minikube start --driver=docker --kubernetes-version=v1.28.0 --memory=2048 --wait=all
 
-echo "Updating kubeconfig context..."
-minikube update-context
-
 echo "Verifying cluster..."
 kubectl cluster-info
 kubectl get nodes
 
-# Copy certs to expected location for external access
+# Ensure cert directory exists
 mkdir -p $HOME/.minikube/profiles/minikube
-cp $HOME/.minikube/profiles/minikube/client.crt $HOME/.minikube/profiles/minikube/client.crt 2>/dev/null || \
+
+# Check if certs already exist as files
+if [[ ! -f "$HOME/.minikube/profiles/minikube/client.crt" ]]; then
+  echo "Extracting client certificate..."
   kubectl config view --raw -o jsonpath='{.users[0].user.client-certificate-data}' | base64 -d > $HOME/.minikube/profiles/minikube/client.crt
-cp $HOME/.minikube/profiles/minikube/client.key $HOME/.minikube/profiles/minikube/client.key 2>/dev/null || \
+fi
+
+if [[ ! -f "$HOME/.minikube/profiles/minikube/client.key" ]]; then
+  echo "Extracting client key..."
   kubectl config view --raw -o jsonpath='{.users[0].user.client-key-data}' | base64 -d > $HOME/.minikube/profiles/minikube/client.key
-cp $HOME/.minikube/ca.crt $HOME/.minikube/ca.crt 2>/dev/null || \
+fi
+
+if [[ ! -f "$HOME/.minikube/ca.crt" ]]; then
+  echo "Extracting CA certificate..."
   kubectl config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d > $HOME/.minikube/ca.crt
+fi
 
 chmod 600 $HOME/.minikube/profiles/minikube/client.key
 chown -R ubuntu:ubuntu $MINIKUBE_HOME $HOME/.kube
