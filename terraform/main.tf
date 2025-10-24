@@ -137,129 +137,80 @@ provider "aws" {
 }
 
 resource "aws_instance" "k8s_node" {
-  ami           = "ami-0bbdd8c17ed981ef9" # Ubuntu 22.04 LTS
+  ami           = "ami-0bbdd8c17ed981ef9" # Ubuntu 22.04 LTS (us-east-1)
   instance_type = "t3.medium"
   key_name      = var.key_name
 
   user_data = <<-EOF
-    #!/bin/bash
-    set -euxo pipefail
-    export DEBIAN_FRONTEND=noninteractive
+              #!/bin/bash
+              set -euxo pipefail
 
-    exec > >(tee -a /var/log/user-data.log) 2>&1
-    echo "=== Starting setup at $(date) ==="
+              # --- System Preparation ---
+              apt-get update -y
+              apt-get install -y docker.io curl conntrack socat apt-transport-https ca-certificates gnupg lsb-release
 
-    # Basic utilities
-    apt-get update
-    apt-get install -y curl conntrack socat apt-transport-https ca-certificates gnupg lsb-release iptables ebtables ethtool
+              systemctl enable docker
+              systemctl start docker
+              usermod -aG docker ubuntu
 
-    # Disable swap for Kubernetes
-    swapoff -a
-    sed -i '/ swap / s/^/#/' /etc/fstab
+              # --- Install kubectl ---
+              mkdir -p /etc/apt/keyrings
+              curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+              echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
+              apt-get update -y
+              apt-get install -y kubectl
 
-    # Install Docker
-    apt-get install -y docker.io
-    systemctl enable docker
-    systemctl start docker
-    usermod -aG docker ubuntu
+              # --- Install Minikube ---
+              curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+              install minikube-linux-amd64 /usr/local/bin/minikube
 
-    # Install kubectl
-    mkdir -p /etc/apt/keyrings
-    curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-    echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
-    apt-get update -o Acquire::AllowInsecureRepositories=true
-    apt-get install -y --allow-unauthenticated kubectl kubelet kubeadm
+              # --- Prepare Ubuntu user environment ---
+              mkdir -p /home/ubuntu/.kube /home/ubuntu/.minikube /home/ubuntu/app
+              chown -R ubuntu:ubuntu /home/ubuntu
 
-    # Prepare directories
-    mkdir -p /home/ubuntu/app /home/ubuntu/.kube /home/ubuntu/.minikube
-    chown -R ubuntu:ubuntu /home/ubuntu
+              # --- Start Minikube as ubuntu user ---
+              su - ubuntu -c '
+              set -euxo pipefail
+              export HOME=/home/ubuntu
+              export MINIKUBE_HOME=/home/ubuntu/.minikube
+              export KUBECONFIG=/home/ubuntu/.kube/config
 
-    # Install Minikube
-    curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
-    install minikube-linux-amd64 /usr/local/bin/minikube
-    chmod +x /usr/local/bin/minikube
+              echo "🚀 Starting Minikube with Docker driver..."
+              minikube start \
+                --driver=docker \
+                --kubernetes-version=v1.28.0 \
+                --memory=2048 \
+                --cpus=2 \
+                --wait=all
 
-    # Run Minikube as ubuntu user using none driver
-    sudo -i -u ubuntu bash <<'INNER_EOF'
-      set -euxo pipefail
-      export HOME=/home/ubuntu
-      export MINIKUBE_HOME=$HOME/.minikube
-      export KUBECONFIG=$HOME/.kube/config
+              echo "🔧 Updating kubeconfig..."
+              minikube update-context
 
-      mkdir -p $MINIKUBE_HOME $HOME/.kube
+              echo "⏳ Waiting for kubeconfig and certificates..."
+              for i in {1..30}; do
+                if [[ -f "$MINIKUBE_HOME/profiles/minikube/client.crt" && \
+                      -f "$MINIKUBE_HOME/profiles/minikube/client.key" && \
+                      -f "$MINIKUBE_HOME/ca.crt" && \
+                      -s "$KUBECONFIG" ]]; then
+                  echo "✅ Minikube kubeconfig and certs ready"
+                  break
+                fi
+                echo "Waiting... ($i/30)"
+                sleep 10
+              done
 
-      echo "Starting Minikube with none driver..."
-      minikube start \
-        --driver=none \
-        --kubernetes-version=v1.28.0 \
-        --wait=all
-
-      echo "Waiting for kubeconfig and certificates..."
-      for i in {1..60}; do
-        if [[ -f "$MINIKUBE_HOME/profiles/minikube/client.crt" && \
-              -f "$MINIKUBE_HOME/profiles/minikube/client.key" && \
-              -f "$MINIKUBE_HOME/ca.crt" && \
-              -s "$KUBECONFIG" ]]; then
-          echo "✅ Minikube kubeconfig and certs are ready."
-          break
-        fi
-        echo "Waiting... ($i/60)"
-        sleep 10
-      done
-
-      echo "Setting correct permissions..."
-      chmod -R 600 $MINIKUBE_HOME/profiles/minikube/*.key
-      chown -R ubuntu:ubuntu $MINIKUBE_HOME $HOME/.kube
-
-      echo "Waiting for Kubernetes system pods..."
-      kubectl wait --for=condition=Ready pods --all --all-namespaces --timeout=300s || true
-
-      echo "Verifying cluster..."
-      kubectl get nodes -o wide
-    INNER_EOF
-
-    touch /home/ubuntu/.minikube-ready
-    chown ubuntu:ubuntu /home/ubuntu/.minikube-ready
-
-    echo "=== User data script completed at $(date) ==="
-  EOF
-
-  vpc_security_group_ids = [aws_security_group.k8s_sg.id]
+              echo "🧩 Waiting for system pods..."
+              kubectl wait --for=condition=Ready pods --all --all-namespaces --timeout=300s || true
+              echo "✅ Cluster ready!"
+              kubectl get nodes -o wide
+              '
+            EOF
 
   tags = {
-    Name = "k8s-minikube-poc"
+    Name = "minikube-ec2"
   }
 }
 
-resource "aws_security_group" "k8s_sg" {
-  name        = "k8s-minikube-sg"
-  description = "Allow SSH and app ports"
-
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    from_port   = 8443
-    to_port     = 8443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    from_port   = 30000
-    to_port     = 32767
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+output "instance_ip" {
+  value = aws_instance.k8s_node.public_ip
 }
