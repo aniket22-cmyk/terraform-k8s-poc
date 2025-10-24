@@ -184,6 +184,7 @@ resource "aws_instance" "k8s_node" {
 set -euxo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
+# Logging
 exec > >(tee -a /var/log/user-data.log) 2>&1
 echo "=== Starting setup at $(date) ==="
 
@@ -210,19 +211,14 @@ install minikube-linux-amd64 /usr/local/bin/minikube
 mkdir -p /home/ubuntu/app /home/ubuntu/.kube /home/ubuntu/.minikube
 chown -R ubuntu:ubuntu /home/ubuntu
 
-# Create Minikube setup script
-cat <<'EOT' > /tmp/minikube-setup.sh
-#!/bin/bash
-set -euxo pipefail
-
+# Run Minikube as ubuntu user
+runuser -l ubuntu -c '
 export HOME=/home/ubuntu
 export MINIKUBE_HOME=$HOME/.minikube
 export KUBECONFIG=$HOME/.kube/config
 
-mkdir -p $MINIKUBE_HOME $HOME/.kube
-
 echo "Starting Minikube..."
-minikube start --driver=docker --kubernetes-version=v1.28.0 --memory=2048 --wait=all
+minikube start --driver=docker --kubernetes-version=v1.28.0 --memory=2048 --wait=all --force
 
 echo "Updating kubeconfig context..."
 minikube update-context
@@ -246,14 +242,9 @@ chown -R ubuntu:ubuntu $MINIKUBE_HOME $HOME/.kube
 echo "Waiting for Kubernetes system pods..."
 kubectl wait --for=condition=Ready pods --all --all-namespaces --timeout=300s || true
 kubectl get nodes -o wide
-EOT
+'
 
-chmod +x /tmp/minikube-setup.sh
-
-# Run the setup script as root (certs go to ubuntu's home)
-bash /tmp/minikube-setup.sh
-
-# Mark ready
+# Mark Minikube ready
 touch /home/ubuntu/.minikube-ready
 chown ubuntu:ubuntu /home/ubuntu/.minikube-ready
 
