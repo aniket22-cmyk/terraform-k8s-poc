@@ -228,29 +228,29 @@ echo "Starting Minikube with docker driver..."
 minikube start --driver=docker --kubernetes-version=v1.28.0 --memory=2048 --wait=all
 
 echo "Verifying cluster..."
-kubectl cluster-info
-kubectl get nodes
+kubectl cluster-info || true
+kubectl get nodes || true
+
+# Wait a moment for everything to settle
+sleep 5
 
 # Ensure cert directory exists
 mkdir -p $HOME/.minikube/profiles/minikube
 
-# Check if certs already exist as files
-if [[ ! -f "$HOME/.minikube/profiles/minikube/client.crt" ]]; then
-  echo "Extracting client certificate..."
-  kubectl config view --raw -o jsonpath='{.users[0].user.client-certificate-data}' | base64 -d > $HOME/.minikube/profiles/minikube/client.crt
-fi
+echo "Extracting certificates from kubeconfig..."
+# Extract certificates - docker driver embeds them in kubeconfig
+kubectl config view --raw -o jsonpath='{.users[?(@.name=="minikube")].user.client-certificate-data}' | base64 -d > $HOME/.minikube/profiles/minikube/client.crt
+kubectl config view --raw -o jsonpath='{.users[?(@.name=="minikube")].user.client-key-data}' | base64 -d > $HOME/.minikube/profiles/minikube/client.key
+kubectl config view --raw -o jsonpath='{.clusters[?(@.name=="minikube")].cluster.certificate-authority-data}' | base64 -d > $HOME/.minikube/ca.crt
 
-if [[ ! -f "$HOME/.minikube/profiles/minikube/client.key" ]]; then
-  echo "Extracting client key..."
-  kubectl config view --raw -o jsonpath='{.users[0].user.client-key-data}' | base64 -d > $HOME/.minikube/profiles/minikube/client.key
-fi
-
-if [[ ! -f "$HOME/.minikube/ca.crt" ]]; then
-  echo "Extracting CA certificate..."
-  kubectl config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d > $HOME/.minikube/ca.crt
-fi
+# Verify files were created
+ls -lah $HOME/.minikube/profiles/minikube/client.crt
+ls -lah $HOME/.minikube/profiles/minikube/client.key
+ls -lah $HOME/.minikube/ca.crt
 
 chmod 600 $HOME/.minikube/profiles/minikube/client.key
+chmod 644 $HOME/.minikube/profiles/minikube/client.crt
+chmod 644 $HOME/.minikube/ca.crt
 chown -R ubuntu:ubuntu $MINIKUBE_HOME $HOME/.kube
 
 echo "Waiting for Kubernetes system pods..."
