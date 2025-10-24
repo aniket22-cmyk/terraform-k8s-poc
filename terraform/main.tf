@@ -105,8 +105,3 @@ resource "aws_security_group" "k8s_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 }
-
-
-output "ec2_public_ip" {
-  value = aws_instance.k8s_node.public_ip
-}
