@@ -53,7 +53,7 @@
 
 #               echo "Starting Minikube..."
 #               minikube start \
-#                 --driver=docker \
+#                 --driver=none \
 #                 --kubernetes-version=v1.28.0 \
 #                 --memory=2048 \
 #                 --wait=all
@@ -218,7 +218,7 @@ export MINIKUBE_HOME=$HOME/.minikube
 export KUBECONFIG=$HOME/.kube/config
 
 echo "Starting Minikube..."
-minikube start --driver=docker --kubernetes-version=v1.28.0 --memory=2048 --wait=all --force
+minikube start --driver=none --kubernetes-version=v1.28.0 --memory=2048 --wait=all --force
 
 echo "Updating kubeconfig context..."
 minikube update-context
