@@ -3,8 +3,8 @@ provider "aws" {
 }
 
 resource "aws_instance" "k8s_node" {
-  ami           = "ami-0a0e5d9c7acc336f1"  # Ubuntu 22.04 LTS (us-east-1)
-  instance_type = "t3.medium"
+  ami           = "ami-0bbdd8c17ed981ef9"  # Ubuntu 22.04 LTS (us-east-1)
+  instance_type = "t3.micro"
   key_name      = var.key_name
 
   user_data = <<-EOF
