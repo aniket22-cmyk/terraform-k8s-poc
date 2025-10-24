@@ -43,12 +43,49 @@ jobs:
           echo "✅ EC2 IP: $IP"
           echo "ip=$IP" >> $GITHUB_OUTPUT
 
-      - name: Setup SSH Key
+      - name: Debug Secrets & Environment
         run: |
+          echo "🔍 Debug: Checking secrets and env"
+          echo "EC2_KEY_NAME = '${{ secrets.EC2_KEY_NAME }}'"
+          echo "SSH key length = ${#SSH_PRIVATE_KEY}"
+          echo "IP from previous step = '${{ steps.get-ip.outputs.ip }}'"
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Setup SSH Key (Safe)
+        run: |
+          echo "🔧 Setting up SSH..."
           mkdir -p ~/.ssh
+          echo "✅ mkdir succeeded"
+
+          # Write key with extra safety
+          if [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "❌ SSH_PRIVATE_KEY is EMPTY!"
+            exit 1
+          fi
+
+          # Use printf to avoid echo quirks
           printf '%s' "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan ${{ steps.get-ip.outputs.ip }} >> ~/.ssh/known_hosts
+          echo "✅ Key written. File size: $(wc -c < ~/.ssh/id_rsa) bytes"
+
+          # Validate it's a real SSH key
+          if ! head -n1 ~/.ssh/id_rsa | grep -q "PRIVATE KEY"; then
+            echo "❌ Key does NOT look like a valid private key!"
+            cat ~/.ssh/id_rsa
+            exit 1
+          fi
+
+          # Wait a bit before ssh-keyscan
+          sleep 10
+          HOST="${{ steps.get-ip.outputs.ip }}"
+          if [ -z "$HOST" ]; then
+            echo "❌ HOST is empty!"
+            exit 1
+          fi
+          echo "📡 Running ssh-keyscan for $HOST"
+          ssh-keyscan "$HOST" >> ~/.ssh/known_hosts
+          echo "✅ SSH setup complete"
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
 
@@ -73,8 +110,7 @@ jobs:
         run: |
           HOST="${{ steps.get-ip.outputs.ip }}"
           echo "⏳ Waiting for Minikube to be ready (kubeconfig to appear)..."
-
-          # Wait for kubeconfig to exist (up to 5 minutes)
+          # Wait for kubeconfig to exist
           for i in {1..25}; do
             if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 ubuntu@$HOST "test -f /home/ubuntu/.kube/config"; then
               echo "✅ kubeconfig found!"
@@ -84,15 +120,11 @@ jobs:
             sleep 12
           done
 
-          # Final check
+          # Double-check: if still missing, fail
           if ! ssh -o StrictHostKeyChecking=no ubuntu@$HOST "test -f /home/ubuntu/.kube/config"; then
             echo "❌ kubeconfig never appeared after 5 minutes!"
             exit 1
           fi
-
-          # Fetch kubeconfig
-          echo "📥 Fetching kubeconfig from ubuntu@$HOST"
+          # Fetch and deploy
           scp -o StrictHostKeyChecking=no ubuntu@$HOST:/home/ubuntu/.kube/config ~/.kube/config
-
-          # Deploy app
           kubectl apply -f k8s/deployment.yaml
