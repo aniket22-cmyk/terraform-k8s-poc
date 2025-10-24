@@ -132,6 +132,9 @@
 #     cidr_blocks = ["0.0.0.0/0"]
 #   }
 # }
+
+
+
 provider "aws" {
   region = var.aws_region
 }
@@ -222,36 +225,37 @@ export KUBECONFIG=$HOME/.kube/config
 mkdir -p $MINIKUBE_HOME $HOME/.kube
 
 echo "Starting Minikube with docker driver..."
-# Use docker driver instead of none - this works out of the box
 minikube start --driver=docker --kubernetes-version=v1.28.0 --memory=2048 --wait=all
 
 echo "Updating kubeconfig context..."
 minikube update-context
 
-echo "Waiting for kubeconfig and certs..."
-for i in $(seq 1 60); do
-  if [[ -f "$MINIKUBE_HOME/profiles/minikube/client.crt" &&
-        -f "$MINIKUBE_HOME/profiles/minikube/client.key" &&
-        -f "$MINIKUBE_HOME/ca.crt" &&
-        -s "$KUBECONFIG" ]]; then
-    echo "✅ Minikube kubeconfig and certs ready"
-    break
-  fi
-  echo "Waiting... ($i/60)"
-  sleep 10
-done
+echo "Verifying cluster..."
+kubectl cluster-info
+kubectl get nodes
 
-chmod -R 600 $MINIKUBE_HOME/profiles/minikube/*.key 2>/dev/null || true
+# Copy certs to expected location for external access
+mkdir -p $HOME/.minikube/profiles/minikube
+cp $HOME/.minikube/profiles/minikube/client.crt $HOME/.minikube/profiles/minikube/client.crt 2>/dev/null || \
+  kubectl config view --raw -o jsonpath='{.users[0].user.client-certificate-data}' | base64 -d > $HOME/.minikube/profiles/minikube/client.crt
+cp $HOME/.minikube/profiles/minikube/client.key $HOME/.minikube/profiles/minikube/client.key 2>/dev/null || \
+  kubectl config view --raw -o jsonpath='{.users[0].user.client-key-data}' | base64 -d > $HOME/.minikube/profiles/minikube/client.key
+cp $HOME/.minikube/ca.crt $HOME/.minikube/ca.crt 2>/dev/null || \
+  kubectl config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d > $HOME/.minikube/ca.crt
+
+chmod 600 $HOME/.minikube/profiles/minikube/client.key
 chown -R ubuntu:ubuntu $MINIKUBE_HOME $HOME/.kube
 
 echo "Waiting for Kubernetes system pods..."
 kubectl wait --for=condition=Ready pods --all --all-namespaces --timeout=300s || true
-kubectl get nodes -o wide
+kubectl get pods --all-namespaces
+
+echo "✅ Minikube setup complete"
 EOT
 
 chmod +x /tmp/minikube-setup.sh
 
-# Run the setup script as ubuntu user (docker driver requires non-root)
+# Run the setup script as ubuntu user
 su - ubuntu -c "bash /tmp/minikube-setup.sh"
 
 # Mark ready
