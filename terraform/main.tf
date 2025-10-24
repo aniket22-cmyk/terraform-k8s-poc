@@ -85,6 +85,13 @@ resource "aws_security_group" "k8s_sg" {
   }
 
   ingress {
+    from_port   = 8443
+    to_port     = 8443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
     from_port   = 30001
     to_port     = 30001
     protocol    = "tcp"
@@ -97,4 +104,9 @@ resource "aws_security_group" "k8s_sg" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
+}
+
+
+output "ec2_public_ip" {
+  value = aws_instance.k8s_node.public_ip
 }

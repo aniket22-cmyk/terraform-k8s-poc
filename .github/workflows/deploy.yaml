@@ -52,31 +52,26 @@ jobs:
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      - name: Setup SSH Key (Safe)
+      - name: Setup SSH Key
         run: |
           echo "🔧 Setting up SSH..."
           mkdir -p ~/.ssh
           echo "✅ mkdir succeeded"
 
-          # Write key with extra safety
           if [ -z "$SSH_PRIVATE_KEY" ]; then
             echo "❌ SSH_PRIVATE_KEY is EMPTY!"
             exit 1
           fi
 
-          # Use printf to avoid echo quirks
           printf '%s' "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           echo "✅ Key written. File size: $(wc -c < ~/.ssh/id_rsa) bytes"
 
-          # Validate it's a real SSH key
           if ! head -n1 ~/.ssh/id_rsa | grep -q "PRIVATE KEY"; then
             echo "❌ Key does NOT look like a valid private key!"
-            cat ~/.ssh/id_rsa
             exit 1
           fi
 
-          # Wait a bit before ssh-keyscan
           sleep 10
           HOST="${{ steps.get-ip.outputs.ip }}"
           if [ -z "$HOST" ]; then
@@ -89,49 +84,78 @@ jobs:
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      - name: Copy App to EC2 (with retry)
+      - name: Wait for EC2 and Create App Directory
         run: |
-          set +e
           HOST="${{ steps.get-ip.outputs.ip }}"
-          for i in {1..12}; do
+          echo "⏳ Waiting for SSH access and creating app directory..."
+          
+          for i in {1..30}; do
+            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 ubuntu@$HOST "mkdir -p /home/ubuntu/app && echo 'Ready'" 2>/dev/null; then
+              echo "✅ SSH accessible and app directory created!"
+              exit 0
+            fi
+            echo "⏳ Waiting for SSH... (attempt $i/30)"
+            sleep 10
+          done
+          
+          echo "❌ Failed to establish SSH connection"
+          exit 1
+
+      - name: Copy App to EC2
+        run: |
+          HOST="${{ steps.get-ip.outputs.ip }}"
+          
+          for i in {1..5}; do
             echo "🔄 Attempt $i to copy app.py to ubuntu@$HOST..."
-            scp -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o BatchMode=yes app.py ubuntu@$HOST:/home/ubuntu/app/app.py
+            scp -o StrictHostKeyChecking=no -o ConnectTimeout=30 app.py ubuntu@$HOST:/home/ubuntu/app/app.py
             if [ $? -eq 0 ]; then
               echo "✅ Copy succeeded!"
               exit 0
             fi
-            echo "⚠️ Attempt $i failed. Waiting 30s before retry..."
-            sleep 30
+            echo "⚠️ Attempt $i failed. Waiting 10s before retry..."
+            sleep 10
           done
-          echo "❌ Failed to copy app.py after 12 attempts (6 minutes)"
+          echo "❌ Failed to copy app.py after 5 attempts"
           exit 1
 
       - name: Deploy to Kubernetes
         run: |
           HOST="${{ steps.get-ip.outputs.ip }}"
-          echo "⏳ Waiting for Minikube to be ready (kubeconfig to appear)..."
-          # Wait for kubeconfig to exist
+          echo "⏳ Waiting for Minikube to be ready..."
+          
           for i in {1..60}; do
-            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 ubuntu@$HOST "test -f /home/ubuntu/.kube/config"; then
-              echo "✅ kubeconfig found!"
+            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 ubuntu@$HOST "test -f /home/ubuntu/.minikube-ready && test -f /home/ubuntu/.kube/config"; then
+              echo "✅ Minikube is ready!"
               break
             fi
-            # Show user-data logs for debugging
+            
             if [ $((i % 10)) -eq 0 ]; then
-              echo "checking setup progress..."
-              ssh -o StrictHostKeyChecking=no ubuntu@$HOST "tail -20 /var/log/user-data.log" || true
+              echo "📋 Checking setup progress..."
+              ssh -o StrictHostKeyChecking=no ubuntu@$HOST "tail -30 /var/log/user-data.log" || echo "Logs not available yet"
             fi
 
-            echo "waiting....(attempt $i/60)"
+            echo "⏳ Waiting... (attempt $i/60)"
             sleep 10
           done
 
-          # Double-check: if still missing, fail
           if ! ssh -o StrictHostKeyChecking=no ubuntu@$HOST "test -f /home/ubuntu/.kube/config"; then
-            echo "minikube setup failed!"
-            ssh -o StrictHostKeyChecking=no ubuntu@$HOST "cat /var/log/user-data.log"
+            echo "❌ Minikube setup failed! Full logs:"
+            ssh -o StrictHostKeyChecking=no ubuntu@$HOST "cat /var/log/user-data.log" || echo "Cannot retrieve logs"
             exit 1
           fi
-          # Fetch and deploy
+          
+          echo "📥 Copying kubeconfig..."
+          mkdir -p ~/.kube
           scp -o StrictHostKeyChecking=no ubuntu@$HOST:/home/ubuntu/.kube/config ~/.kube/config
+          
+          echo "🔧 Updating kubeconfig server IP..."
+          sed -i "s|https://.*:8443|https://$HOST:8443|g" ~/.kube/config
+          
+          echo "🚀 Deploying to Kubernetes..."
           kubectl apply -f k8s/deployment.yaml
+          
+          echo "✅ Deployment complete!"
+          echo "📊 Pod status:"
+          kubectl get pods
+          echo "📊 Service status:"
+          kubectl get svc
