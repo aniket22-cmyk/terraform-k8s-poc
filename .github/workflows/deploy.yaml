@@ -34,25 +34,85 @@ jobs:
       - name: Get EC2 Public IP
         id: get-ip
         run: |
+          cd terraform
           IP=$(terraform output -raw ec2_public_ip)
+          if [ -z "$IP" ]; then
+            echo "❌ FATAL: ec2_public_ip is empty!"
+            exit 1
+          fi
+          echo "✅ EC2 IP: $IP"
           echo "ip=$IP" >> $GITHUB_OUTPUT
-        working-directory: ./terraform
 
-      - name: Setup SSH Key
+      - name: Debug Secrets & Environment
         run: |
-          mkdir -p ~/.ssh
-          echo "$SSH_PRIVATE_KEY" | base64 --decode > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan ${{ steps.get-ip.outputs.ip }} >> ~/.ssh/known_hosts
+          echo "🔍 Debug: Checking secrets and env"
+          echo "EC2_KEY_NAME = '${{ secrets.EC2_KEY_NAME }}'"
+          echo "SSH key length = ${#SSH_PRIVATE_KEY}"
+          echo "IP from previous step = '${{ steps.get-ip.outputs.ip }}'"
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      - name: Copy App to EC2
+      - name: Setup SSH Key (Safe)
         run: |
-          sleep 180
-          scp -o StrictHostKeyChecking=no app.py ubuntu@${{ steps.get-ip.outputs.ip }}:/home/ubuntu/app/app.py
+          echo "🔧 Setting up SSH..."
+          mkdir -p ~/.ssh
+          echo "✅ mkdir succeeded"
+
+          # Write key with extra safety
+          if [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "❌ SSH_PRIVATE_KEY is EMPTY!"
+            exit 1
+          fi
+
+          # Use printf to avoid echo quirks
+          printf '%s' "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          echo "✅ Key written. File size: $(wc -c < ~/.ssh/id_rsa) bytes"
+
+          # Validate it's a real SSH key
+          if ! head -n1 ~/.ssh/id_rsa | grep -q "PRIVATE KEY"; then
+            echo "❌ Key does NOT look like a valid private key!"
+            cat ~/.ssh/id_rsa
+            exit 1
+          fi
+
+          # Wait a bit before ssh-keyscan
+          sleep 10
+          HOST="${{ steps.get-ip.outputs.ip }}"
+          if [ -z "$HOST" ]; then
+            echo "❌ HOST is empty!"
+            exit 1
+          fi
+          echo "📡 Running ssh-keyscan for $HOST"
+          ssh-keyscan "$HOST" >> ~/.ssh/known_hosts
+          echo "✅ SSH setup complete"
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Copy App to EC2 (with retry)
+        run: |
+          set +e
+          HOST="${{ steps.get-ip.outputs.ip }}"
+          for i in {1..12}; do
+            echo "🔄 Attempt $i to copy app.py to ubuntu@$HOST..."
+            scp -o StrictHostKeyChecking=no -o ConnectTimeout=30 -o BatchMode=yes app.py ubuntu@$HOST:/home/ubuntu/app/app.py
+            if [ $? -eq 0 ]; then
+              echo "✅ Copy succeeded!"
+              exit 0
+            fi
+            echo "⚠️ Attempt $i failed. Waiting 30s before retry..."
+            sleep 30
+          done
+          echo "❌ Failed to copy app.py after 12 attempts (6 minutes)"
+          exit 1
 
       - name: Deploy to Kubernetes
         run: |
-          scp -o StrictHostKeyChecking=no ubuntu@${{ steps.get-ip.outputs.ip }}:/home/ubuntu/.kube/config ~/.kube/config
+          HOST="${{ steps.get-ip.outputs.ip }}"
+          echo "📥 Fetching kubeconfig from ubuntu@$HOST"
+          scp -o StrictHostKeyChecking=no -o ConnectTimeout=30 ubuntu@$HOST:/home/ubuntu/.kube/config ~/.kube/config
+          if [ $? -ne 0 ]; then
+            echo "❌ Failed to fetch kubeconfig"
+            exit 1
+          fi
           kubectl apply -f k8s/deployment.yaml
