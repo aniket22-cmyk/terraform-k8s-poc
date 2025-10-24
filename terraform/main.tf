@@ -28,15 +28,15 @@ resource "aws_instance" "k8s_node" {
               # Install kubectl (v1.28)
               echo "Installing kubectl..."
               mkdir -p /etc/apt/keyrings
-              curl -fsSLo /etc/apt/keyrings/kubernetes-apt-keyring.gpg https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key
-              echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
-              apt-get update
-              apt-get install -y kubectl
+              curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+              echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
+              apt-get update -o Acquire::AllowInsecureRepositories=true
+              apt-get install -y --allow-unauthenticated kubectl
 
               # Install Minikube
               echo "Installing Minikube..."
-              curl -Lo /usr/local/bin/minikube https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
-              chmod +x /usr/local/bin/minikube
+              curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+              install minikube-linux-amd64 /usr/local/bin/minikube
 
               # Prepare app directory
               mkdir -p /home/ubuntu/app
@@ -47,13 +47,13 @@ resource "aws_instance" "k8s_node" {
               set -euxo pipefail
               export HOME=/home/ubuntu
 
-              echo "🏁 Starting Minikube with Docker driver..."
-              minikube start --driver=docker --kubernetes-version=v1.28.0 --force --wait=all
+              # Start Minikube using Docker driver (v1.27.0)
+              minikube start --driver=docker --kubernetes-version=v1.27.0 --force --wait=all
 
-              echo "🔍 Verifying Minikube status..."
+              echo "Verifying Minikube status..."
               minikube status
-
-              echo "⏳ Waiting for Minikube kubeconfig and certs to be ready..."
+              # Wait until kubeconfig and certificates exist
+              echo "Waiting for Minikube kubeconfig and certs to be ready..."
               for i in {1..30}; do
                 if [[ -f "$HOME/.minikube/profiles/minikube/client.crt" && \
                       -f "$HOME/.minikube/profiles/minikube/client.key" && \
@@ -62,14 +62,13 @@ resource "aws_instance" "k8s_node" {
                   echo "✅ Minikube kubeconfig and certs are ready."
                   break
                 fi
-                echo "⏳ Waiting for kubeconfig files... ($i/30)"
-                sleep 5
+                echo "Waiting for kubeconfig files... ($i/30)"
+                sleep
               done
-
-              echo "🕓 Waiting for Kubernetes system pods..."
+              echo "Waiting for Kubernetes system pods..."
               kubectl wait --for=condition=Ready pods --all --all-namespaces --timeout=300s || true
 
-              echo "=== Minikube setup complete at $(date) ==="
+              echo "=== Minikube setup complete ==="
               INNER_EOF
 
               touch /home/ubuntu/.minikube-ready
@@ -103,7 +102,6 @@ resource "aws_security_group" "k8s_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  # Allow NodePort range (useful for service exposure)
   ingress {
     from_port   = 30000
     to_port     = 32767
