@@ -149,6 +149,7 @@ resource "aws_instance" "k8s_node" {
               exec > >(tee -a /var/log/user-data.log) 2>&1
               echo "=== Starting setup at $(date) ==="
 
+              # Install dependencies
               apt-get update
               apt-get install -y python3 curl conntrack socat apt-transport-https ca-certificates gnupg lsb-release
 
@@ -159,7 +160,7 @@ resource "aws_instance" "k8s_node" {
               systemctl start docker
               usermod -aG docker ubuntu
 
-              # Install kubectl (v1.28)
+              # Install kubectl v1.28
               echo "Installing kubectl..."
               mkdir -p /etc/apt/keyrings
               curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
@@ -172,59 +173,48 @@ resource "aws_instance" "k8s_node" {
               curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
               install minikube-linux-amd64 /usr/local/bin/minikube
 
-              mkdir -p /home/ubuntu/app
-              chown -R ubuntu:ubuntu /home/ubuntu/app
+              # Prepare home directories
+              mkdir -p /home/ubuntu/app /home/ubuntu/.kube /home/ubuntu/.minikube
+              chown -R ubuntu:ubuntu /home/ubuntu
 
               echo "=== Launching Minikube as ubuntu user ==="
-              sudo -u ubuntu -i bash <<'INNER_EOF'
-              set -euxo pipefail
-              export HOME=/home/ubuntu
-              export MINIKUBE_HOME=\$HOME/.minikube
-              export KUBECONFIG=\$HOME/.kube/config
+              runuser -u ubuntu bash -c "
+                set -euxo pipefail
+                export HOME=/home/ubuntu
+                export MINIKUBE_HOME=\$HOME/.minikube
+                export KUBECONFIG=\$HOME/.kube/config
 
-              mkdir -p \$MINIKUBE_HOME \$HOME/.kube
+                mkdir -p \$MINIKUBE_HOME \$HOME/.kube
 
-              echo "Starting Minikube..."
-              minikube start \
-                --driver=docker \
-                --kubernetes-version=v1.28.0 \
-                --memory=2048 \
-                --wait=all
+                echo 'Starting Minikube...'
+                minikube start --driver=docker --kubernetes-version=v1.28.0 --memory=2048 --wait=all
 
-              echo "Verifying Minikube status..."
-              minikube status || true
+                echo 'Updating kubeconfig context...'
+                minikube update-context
 
-              echo "Ensuring certs exist..."
-              ls -l \$MINIKUBE_HOME/profiles/minikube || true
+                echo 'Waiting for kubeconfig and certs...'
+                for i in {1..60}; do
+                  if [[ -f \"\$MINIKUBE_HOME/profiles/minikube/client.crt\" && \
+                        -f \"\$MINIKUBE_HOME/profiles/minikube/client.key\" && \
+                        -f \"\$MINIKUBE_HOME/ca.crt\" && \
+                        -s \"\$KUBECONFIG\" ]]; then
+                    echo '✅ Minikube kubeconfig and certs are ready.'
+                    break
+                  fi
+                  echo 'Waiting... (\$i/60)'
+                  sleep 10
+                done
 
-              echo "Copying kubeconfig and certs..."
-              cp -r \$MINIKUBE_HOME/profiles/minikube \$HOME/.minikube_backup || true
-              chmod -R 600 \$HOME/.minikube/profiles/minikube/*.key || true
+                echo 'Setting correct permissions...'
+                chmod -R 600 \$MINIKUBE_HOME/profiles/minikube/*.key
+                chown -R ubuntu:ubuntu \$MINIKUBE_HOME \$HOME/.kube
 
-              echo "Fixing kubeconfig absolute paths..."
-              sed -i "s|client-certificate:.*|client-certificate: \$MINIKUBE_HOME/profiles/minikube/client.crt|g" \$KUBECONFIG || true
-              sed -i "s|client-key:.*|client-key: \$MINIKUBE_HOME/profiles/minikube/client.key|g" \$KUBECONFIG || true
-              sed -i "s|certificate-authority:.*|certificate-authority: \$MINIKUBE_HOME/ca.crt|g" \$KUBECONFIG || true
+                echo 'Waiting for Kubernetes system pods...'
+                kubectl wait --for=condition=Ready pods --all --all-namespaces --timeout=300s || true
 
-              echo "Waiting for kubeconfig and certs..."
-              for i in {1..60}; do
-                if [[ -s "\$KUBECONFIG" && -f "\$MINIKUBE_HOME/profiles/minikube/client.crt" ]]; then
-                  echo "✅ Minikube kubeconfig and certs are ready."
-                  break
-                fi
-                echo "Waiting for kubeconfig files... (\$i/60)"
-                sleep 5
-              done
-
-              echo "Updating context..."
-              minikube update-context
-
-              echo "Waiting for Kubernetes system pods..."
-              kubectl wait --for=condition=Ready pods --all --all-namespaces --timeout=300s || true
-
-              echo "Cluster verification:"
-              kubectl get nodes -o wide || true
-              INNER_EOF
+                echo 'Verifying cluster:'
+                kubectl get nodes -o wide
+              "
 
               touch /home/ubuntu/.minikube-ready
               chown ubuntu:ubuntu /home/ubuntu/.minikube-ready
