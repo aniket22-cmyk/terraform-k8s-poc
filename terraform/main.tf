@@ -206,7 +206,7 @@ apt-get install -y --allow-unauthenticated kubectl
 curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
 install minikube-linux-amd64 /usr/local/bin/minikube
 
-# Prepare app directories
+# Prepare directories
 mkdir -p /home/ubuntu/app /home/ubuntu/.kube /home/ubuntu/.minikube
 chown -R ubuntu:ubuntu /home/ubuntu
 
@@ -250,8 +250,8 @@ EOT
 
 chmod +x /tmp/minikube-setup.sh
 
-# Run setup script as ubuntu
-sudo -i -u ubuntu bash /tmp/minikube-setup.sh
+# Run the setup script as root (certs go to ubuntu's home)
+bash /tmp/minikube-setup.sh
 
 # Mark ready
 touch /home/ubuntu/.minikube-ready
