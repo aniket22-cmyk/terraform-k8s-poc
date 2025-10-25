@@ -37,15 +37,15 @@
 #           cd terraform
 #           IP=$(terraform output -raw ec2_public_ip)
 #           if [ -z "$IP" ]; then
-#             echo "❌ FATAL: ec2_public_ip is empty!"
+#             echo " FATAL: ec2_public_ip is empty!"
 #             exit 1
 #           fi
-#           echo "✅ EC2 IP: $IP"
+#           echo " EC2 IP: $IP"
 #           echo "ip=$IP" >> $GITHUB_OUTPUT
 
 #       - name: Debug Secrets & Environment
 #         run: |
-#           echo "🔍 Debug: Checking secrets and env"
+#           echo " Debug: Checking secrets and env"
 #           echo "EC2_KEY_NAME = '${{ secrets.EC2_KEY_NAME }}'"
 #           echo "SSH key length = ${#SSH_PRIVATE_KEY}"
 #           echo "IP from previous step = '${{ steps.get-ip.outputs.ip }}'"
@@ -54,51 +54,51 @@
 
 #       - name: Setup SSH Key
 #         run: |
-#           echo "🔧 Setting up SSH..."
+#           echo " Setting up SSH..."
 #           mkdir -p ~/.ssh
-#           echo "✅ mkdir succeeded"
+#           echo "mkdir succeeded"
 
 #           if [ -z "$SSH_PRIVATE_KEY" ]; then
-#             echo "❌ SSH_PRIVATE_KEY is EMPTY!"
+#             echo " SSH_PRIVATE_KEY is EMPTY!"
 #             exit 1
 #           fi
 
 #           printf '%s' "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
 #           chmod 600 ~/.ssh/id_rsa
-#           echo "✅ Key written. File size: $(wc -c < ~/.ssh/id_rsa) bytes"
+#           echo " Key written. File size: $(wc -c < ~/.ssh/id_rsa) bytes"
 
 #           if ! head -n1 ~/.ssh/id_rsa | grep -q "PRIVATE KEY"; then
-#             echo "❌ Key does NOT look like a valid private key!"
+#             echo " Key does NOT look like a valid private key!"
 #             exit 1
 #           fi
 
 #           sleep 10
 #           HOST="${{ steps.get-ip.outputs.ip }}"
 #           if [ -z "$HOST" ]; then
-#             echo "❌ HOST is empty!"
+#             echo " HOST is empty!"
 #             exit 1
 #           fi
-#           echo "📡 Running ssh-keyscan for $HOST"
+#           echo " Running ssh-keyscan for $HOST"
 #           ssh-keyscan "$HOST" >> ~/.ssh/known_hosts
-#           echo "✅ SSH setup complete"
+#           echo " SSH setup complete"
 #         env:
 #           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
 
 #       - name: Wait for EC2 and Create App Directory
 #         run: |
 #           HOST="${{ steps.get-ip.outputs.ip }}"
-#           echo "⏳ Waiting for SSH access and creating app directory..."
+#           echo " Waiting for SSH access and creating app directory..."
           
 #           for i in {1..30}; do
 #             if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 ubuntu@$HOST "mkdir -p /home/ubuntu/app && echo 'Ready'" 2>/dev/null; then
-#               echo "✅ SSH accessible and app directory created!"
+#               echo " SSH accessible and app directory created!"
 #               exit 0
 #             fi
-#             echo "⏳ Waiting for SSH... (attempt $i/30)"
+#             echo " Waiting for SSH... (attempt $i/30)"
 #             sleep 10
 #           done
           
-#           echo "❌ Failed to establish SSH connection"
+#           echo " Failed to establish SSH connection"
 #           exit 1
 
 #       - name: Copy App to EC2
@@ -106,45 +106,45 @@
 #           HOST="${{ steps.get-ip.outputs.ip }}"
           
 #           for i in {1..5}; do
-#             echo "🔄 Attempt $i to copy app.py to ubuntu@$HOST..."
+#             echo " Attempt $i to copy app.py to ubuntu@$HOST..."
 #             scp -o StrictHostKeyChecking=no -o ConnectTimeout=30 app.py ubuntu@$HOST:/home/ubuntu/app/app.py
 #             if [ $? -eq 0 ]; then
-#               echo "✅ Copy succeeded!"
+#               echo " Copy succeeded!"
 #               exit 0
 #             fi
-#             echo "⚠️ Attempt $i failed. Waiting 10s before retry..."
+#             echo " Attempt $i failed. Waiting 10s before retry..."
 #             sleep 10
 #           done
-#           echo "❌ Failed to copy app.py after 5 attempts"
+#           echo " Failed to copy app.py after 5 attempts"
 #           exit 1
 
 #       - name: Deploy to Kubernetes
 #         run: |
 #           HOST="${{ steps.get-ip.outputs.ip }}"
-#           echo "⏳ Waiting for Minikube to be ready..."
+#           echo " Waiting for Minikube to be ready..."
           
 #           for i in {1..60}; do
 #             if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 ubuntu@$HOST "test -f /home/ubuntu/.minikube-ready && test -f /home/ubuntu/.kube/config"; then
-#               echo "✅ Minikube is ready!"
+#               echo " Minikube is ready!"
 #               break
 #             fi
             
 #             if [ $((i % 10)) -eq 0 ]; then
-#               echo "📋 Checking setup progress..."
+#               echo " Checking setup progress..."
 #               ssh -o StrictHostKeyChecking=no ubuntu@$HOST "tail -30 /var/log/user-data.log" || echo "Logs not available yet"
 #             fi
 
-#             echo "⏳ Waiting... (attempt $i/60)"
+#             echo " Waiting... (attempt $i/60)"
 #             sleep 10
 #           done
 
 #           if ! ssh -o StrictHostKeyChecking=no ubuntu@$HOST "test -f /home/ubuntu/.kube/config"; then
-#             echo "❌ Minikube setup failed! Full logs:"
+#             echo " Minikube setup failed! Full logs:"
 #             ssh -o StrictHostKeyChecking=no ubuntu@$HOST "cat /var/log/user-data.log" || echo "Cannot retrieve logs"
 #             exit 1
 #           fi
           
-#           echo "📥 Copying kubeconfig and certificates..."
+#           echo " Copying kubeconfig and certificates..."
 #           mkdir -p ~/.kube
 #           mkdir -p ~/.minikube/profiles/minikube
           
@@ -156,23 +156,23 @@
 #           scp -o StrictHostKeyChecking=no ubuntu@$HOST:/home/ubuntu/.minikube/profiles/minikube/client.crt ~/.minikube/profiles/minikube/client.crt
 #           scp -o StrictHostKeyChecking=no ubuntu@$HOST:/home/ubuntu/.minikube/profiles/minikube/client.key ~/.minikube/profiles/minikube/client.key
           
-#           echo "🔧 Updating kubeconfig server IP and certificate paths..."
+#           echo " Updating kubeconfig server IP and certificate paths..."
 #           sed -i "s|https://.*:8443|https://$HOST:8443|g" ~/.kube/config
           
 #           # Update certificate paths to point to runner's home directory
 #           RUNNER_HOME=$(eval echo ~)
 #           sed -i "s|/home/ubuntu/.minikube|$RUNNER_HOME/.minikube|g" ~/.kube/config
           
-#           echo "📋 Kubeconfig contents:"
+#           echo " Kubeconfig contents:"
 #           cat ~/.kube/config
           
-#           echo "🚀 Deploying to Kubernetes..."
+#           echo " Deploying to Kubernetes..."
 #           kubectl apply -f k8s/deployment.yaml
           
-#           echo "✅ Deployment complete!"
-#           echo "📊 Pod status:"
+#           echo " Deployment complete!"
+#           echo " Pod status:"
 #           kubectl get pods
-#           echo "📊 Service status:"
+#           echo " Service status:"
 #           kubectl get svc
 
 name: Deploy to AWS with Terraform
