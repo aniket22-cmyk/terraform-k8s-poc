@@ -225,7 +225,21 @@ export KUBECONFIG=$HOME/.kube/config
 mkdir -p $MINIKUBE_HOME $HOME/.kube
 
 echo "Starting Minikube with docker driver..."
-minikube start --driver=docker --kubernetes-version=v1.28.0 --memory=2048 --wait=all --wait-timeout=10m
+# Use --apiserver-ips to include the public IP
+PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
+echo "Public IP: $PUBLIC_IP"
+
+minikube start --driver=docker --kubernetes-version=v1.28.0 --memory=2048 --wait=all --wait-timeout=10m --apiserver-ips=$PUBLIC_IP
+
+echo "Setting up port forwarding for API server..."
+# Get the actual API server port from Minikube
+MINIKUBE_IP=$(minikube ip)
+API_PORT=$(kubectl config view -o jsonpath='{.clusters[0].cluster.server}' | grep -oP ':\K[0-9]+')
+echo "Minikube IP: $MINIKUBE_IP, API Port: $API_PORT"
+
+# Forward port 8443 from all interfaces to Minikube
+sudo iptables -t nat -A PREROUTING -p tcp --dport 8443 -j DNAT --to-destination $MINIKUBE_IP:$API_PORT
+sudo iptables -t nat -A POSTROUTING -j MASQUERADE
 
 echo "Verifying cluster..."
 kubectl cluster-info
