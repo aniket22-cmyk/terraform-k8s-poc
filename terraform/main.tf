@@ -231,83 +231,18 @@ echo "Verifying cluster..."
 kubectl cluster-info
 kubectl get nodes
 
-# Check what's in the kubeconfig
-echo "Checking kubeconfig structure..."
-cat $KUBECONFIG
+# Verify certificate files already exist (Minikube creates them)
+echo "Verifying certificate files..."
+ls -lh $HOME/.minikube/profiles/minikube/client.crt
+ls -lh $HOME/.minikube/profiles/minikube/client.key
+ls -lh $HOME/.minikube/ca.crt
 
-# Extract certificates from kubeconfig
-echo "Extracting certificates to files..."
-mkdir -p $HOME/.minikube/profiles/minikube
+# Set correct permissions
+chmod 600 $HOME/.minikube/profiles/minikube/client.key
+chmod 644 $HOME/.minikube/profiles/minikube/client.crt
+chmod 644 $HOME/.minikube/ca.crt
 
-# Extract using Python - handle both embedded data and file paths
-python3 -c "
-import yaml
-import base64
-import sys
-import os
-import shutil
-
-with open('$KUBECONFIG', 'r') as f:
-    config = yaml.safe_load(f)
-
-user = config['users'][0]['user']
-cluster = config['clusters'][0]['cluster']
-
-# Handle client certificate
-if 'client-certificate-data' in user:
-    print('Found embedded client-certificate-data')
-    with open('$HOME/.minikube/profiles/minikube/client.crt', 'wb') as f:
-        f.write(base64.b64decode(user['client-certificate-data']))
-elif 'client-certificate' in user:
-    print(f'Found client-certificate path: {user[\"client-certificate\"]}')
-    src = os.path.expanduser(user['client-certificate'])
-    if os.path.exists(src):
-        shutil.copy(src, '$HOME/.minikube/profiles/minikube/client.crt')
-        print(f'Copied from {src}')
-    else:
-        print(f'ERROR: File not found: {src}')
-
-# Handle client key
-if 'client-key-data' in user:
-    print('Found embedded client-key-data')
-    with open('$HOME/.minikube/profiles/minikube/client.key', 'wb') as f:
-        f.write(base64.b64decode(user['client-key-data']))
-elif 'client-key' in user:
-    print(f'Found client-key path: {user[\"client-key\"]}')
-    src = os.path.expanduser(user['client-key'])
-    if os.path.exists(src):
-        shutil.copy(src, '$HOME/.minikube/profiles/minikube/client.key')
-        print(f'Copied from {src}')
-    else:
-        print(f'ERROR: File not found: {src}')
-
-# Handle CA certificate
-if 'certificate-authority-data' in cluster:
-    print('Found embedded certificate-authority-data')
-    with open('$HOME/.minikube/ca.crt', 'wb') as f:
-        f.write(base64.b64decode(cluster['certificate-authority-data']))
-elif 'certificate-authority' in cluster:
-    print(f'Found certificate-authority path: {cluster[\"certificate-authority\"]}')
-    src = os.path.expanduser(cluster['certificate-authority'])
-    if os.path.exists(src):
-        shutil.copy(src, '$HOME/.minikube/ca.crt')
-        print(f'Copied from {src}')
-    else:
-        print(f'ERROR: File not found: {src}')
-
-print('Certificate extraction complete')
-"
-
-# Verify files have content
-echo "Certificate files created:"
-ls -lh $HOME/.minikube/profiles/minikube/client.crt || echo "client.crt not found"
-ls -lh $HOME/.minikube/profiles/minikube/client.key || echo "client.key not found"
-ls -lh $HOME/.minikube/ca.crt || echo "ca.crt not found"
-
-# Set permissions
-chmod 600 $HOME/.minikube/profiles/minikube/client.key 2>/dev/null || true
-chmod 644 $HOME/.minikube/profiles/minikube/client.crt 2>/dev/null || true
-chmod 644 $HOME/.minikube/ca.crt 2>/dev/null || true
+echo "✅ Certificate files are ready"
 
 echo "Waiting for Kubernetes system pods..."
 kubectl wait --for=condition=Ready pods --all --all-namespaces --timeout=300s || true
