@@ -320,8 +320,15 @@ jobs:
           scp -o StrictHostKeyChecking=no ubuntu@$HOST:/home/ubuntu/.minikube/profiles/minikube/client.crt ~/.minikube/profiles/minikube/client.crt
           scp -o StrictHostKeyChecking=no ubuntu@$HOST:/home/ubuntu/.minikube/profiles/minikube/client.key ~/.minikube/profiles/minikube/client.key
           
-          echo "🔧 Updating kubeconfig server IP..."
+          echo "🔧 Updating kubeconfig server IP and certificate paths..."
           sed -i "s|https://.*:8443|https://$HOST:8443|g" ~/.kube/config
+          
+          # Update certificate paths to point to runner's home directory
+          RUNNER_HOME=$(eval echo ~)
+          sed -i "s|/home/ubuntu/.minikube|$RUNNER_HOME/.minikube|g" ~/.kube/config
+          
+          echo "📋 Kubeconfig contents:"
+          cat ~/.kube/config
           
           echo "🚀 Deploying to Kubernetes..."
           kubectl apply -f k8s/deployment.yaml
