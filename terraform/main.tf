@@ -2,104 +2,6 @@
 #   region = var.aws_region
 # }
 
-# resource "aws_instance" "k8s_node" {
-#   ami           = "ami-0bbdd8c17ed981ef9" # Ubuntu 22.04 LTS (us-east-1)
-#   instance_type = "t3.medium"
-#   key_name      = var.key_name
-
-#   user_data = <<-EOF
-#               #!/bin/bash
-#               set -euxo pipefail
-#               export DEBIAN_FRONTEND=noninteractive
-
-#               exec > >(tee -a /var/log/user-data.log) 2>&1
-#               echo "=== Starting setup at $(date) ==="
-
-#               apt-get update
-#               apt-get install -y python3 curl conntrack socat apt-transport-https ca-certificates gnupg lsb-release
-
-#               # Install Docker
-#               echo "Installing Docker..."
-#               apt-get install -y docker.io
-#               systemctl enable docker
-#               systemctl start docker
-#               usermod -aG docker ubuntu
-
-#               # Install kubectl (v1.28)
-#               echo "Installing kubectl..."
-#               mkdir -p /etc/apt/keyrings
-#               curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-#               echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
-#               apt-get update -o Acquire::AllowInsecureRepositories=true
-#               apt-get install -y --allow-unauthenticated kubectl
-
-#               # Install Minikube
-#               echo "Installing Minikube..."
-#               curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
-#               install minikube-linux-amd64 /usr/local/bin/minikube
-
-#               # Prepare app directory
-#               mkdir -p /home/ubuntu/app
-#               chown -R ubuntu:ubuntu /home/ubuntu/app
-
-#               echo "=== Launching Minikube as ubuntu user ==="
-#               sudo -u ubuntu -i bash <<'INNER_EOF'
-#               set -euxo pipefail
-#               export HOME=/home/ubuntu
-#               export MINIKUBE_HOME=/home/ubuntu/.minikube
-#               export KUBECONFIG=/home/ubuntu/.kube/config
-
-#               mkdir -p $MINIKUBE_HOME $HOME/.kube
-
-#               echo "Starting Minikube..."
-#               minikube start \
-#                 --driver=docker \
-#                 --kubernetes-version=v1.28.0 \
-#                 --memory=2048 \
-#                 --wait=all
-
-#               echo "Verifying Minikube status..."
-#               minikube status || true
-
-#               # Wait for certs and kubeconfig
-#               echo "Waiting for Minikube kubeconfig and certs to be ready..."
-#               for i in {1..60}; do
-#                 if [[ -f "$MINIKUBE_HOME/profiles/minikube/client.crt" && \
-#                       -f "$MINIKUBE_HOME/profiles/minikube/client.key" && \
-#                       -f "$MINIKUBE_HOME/ca.crt" && \
-#                       -s "$KUBECONFIG" ]]; then
-#                   echo "✅ Minikube kubeconfig and certs are ready."
-#                   break
-#                 fi
-#                 echo "Waiting for kubeconfig files... ($i/60)"
-#                 sleep 10
-#               done
-
-#               echo "Fixing kubeconfig context paths..."
-#               minikube update-context
-
-#               echo "Waiting for Kubernetes system pods..."
-#               kubectl wait --for=condition=Ready pods --all --all-namespaces --timeout=300s || true
-
-#               echo "Verifying cluster..."
-#               kubectl get nodes || true
-
-#               echo "=== Minikube setup complete ==="
-#               INNER_EOF
-
-#               touch /home/ubuntu/.minikube-ready
-#               chown ubuntu:ubuntu /home/ubuntu/.minikube-ready
-
-#               echo "=== User data script completed at $(date) ==="
-#               EOF
-
-#   vpc_security_group_ids = [aws_security_group.k8s_sg.id]
-
-#   tags = {
-#     Name = "k8s-minikube-poc"
-#   }
-# }
-
 # resource "aws_security_group" "k8s_sg" {
 #   name        = "k8s-minikube-sg"
 #   description = "Allow SSH and app ports"
@@ -133,8 +35,113 @@
 #   }
 # }
 
+# resource "aws_instance" "k8s_node" {
+#   ami           = "ami-0bbdd8c17ed981ef9" # Ubuntu 22.04 LTS (us-east-1)
+#   instance_type = "t3.medium"
+#   key_name      = var.key_name
+#   vpc_security_group_ids = [aws_security_group.k8s_sg.id]
 
+#   tags = {
+#     Name = "k8s-minikube-poc"
+#   }
 
+#   user_data = <<EOF
+# #!/bin/bash
+# set -euxo pipefail
+# export DEBIAN_FRONTEND=noninteractive
+
+# exec > >(tee -a /var/log/user-data.log) 2>&1
+# echo "=== Starting setup at $(date) ==="
+
+# # Install dependencies
+# apt-get update
+# apt-get install -y python3 python3-yaml curl conntrack socat apt-transport-https ca-certificates gnupg lsb-release docker.io jq
+
+# systemctl enable docker
+# systemctl start docker
+# usermod -aG docker ubuntu
+
+# # Install kubectl
+# mkdir -p /etc/apt/keyrings
+# curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.28/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+# echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.28/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
+# apt-get update
+# apt-get install -y --allow-unauthenticated kubectl
+
+# # Install Minikube
+# curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+# install minikube-linux-amd64 /usr/local/bin/minikube
+
+# # Prepare directories
+# mkdir -p /home/ubuntu/app /home/ubuntu/.kube /home/ubuntu/.minikube
+# chown -R ubuntu:ubuntu /home/ubuntu
+
+# # Create Minikube setup script
+# cat <<'EOT' > /tmp/minikube-setup.sh
+# #!/bin/bash
+# set -euxo pipefail
+
+# export HOME=/home/ubuntu
+# export MINIKUBE_HOME=$HOME/.minikube
+# export KUBECONFIG=$HOME/.kube/config
+
+# mkdir -p $MINIKUBE_HOME $HOME/.kube
+
+# echo "Starting Minikube with docker driver..."
+# # Use --apiserver-ips to include the public IP
+# PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
+# echo "Public IP: $PUBLIC_IP"
+
+# minikube start --driver=docker --kubernetes-version=v1.28.0 --memory=2048 --wait=all --wait-timeout=10m --apiserver-ips=$PUBLIC_IP
+
+# echo "Setting up port forwarding for API server..."
+# # Get the actual API server port from Minikube
+# MINIKUBE_IP=$(minikube ip)
+# API_PORT=$(kubectl config view -o jsonpath='{.clusters[0].cluster.server}' | grep -oP ':\K[0-9]+')
+# echo "Minikube IP: $MINIKUBE_IP, API Port: $API_PORT"
+
+# # Forward port 8443 from all interfaces to Minikube
+# sudo iptables -t nat -A PREROUTING -p tcp --dport 8443 -j DNAT --to-destination $MINIKUBE_IP:$API_PORT
+# sudo iptables -t nat -A POSTROUTING -j MASQUERADE
+
+# echo "Verifying cluster..."
+# kubectl cluster-info
+# kubectl get nodes
+
+# # Verify certificate files already exist (Minikube creates them)
+# echo "Verifying certificate files..."
+# ls -lh $HOME/.minikube/profiles/minikube/client.crt
+# ls -lh $HOME/.minikube/profiles/minikube/client.key
+# ls -lh $HOME/.minikube/ca.crt
+
+# # Set correct permissions
+# chmod 600 $HOME/.minikube/profiles/minikube/client.key
+# chmod 644 $HOME/.minikube/profiles/minikube/client.crt
+# chmod 644 $HOME/.minikube/ca.crt
+
+# echo "✅ Certificate files are ready"
+
+# echo "Waiting for Kubernetes system pods..."
+# kubectl wait --for=condition=Ready pods --all --all-namespaces --timeout=300s || true
+# kubectl get pods --all-namespaces
+
+# chown -R ubuntu:ubuntu $MINIKUBE_HOME $HOME/.kube
+
+# echo "✅ Minikube setup complete"
+# EOT
+
+# chmod +x /tmp/minikube-setup.sh
+
+# # Run the setup script as ubuntu user
+# su - ubuntu -c "bash /tmp/minikube-setup.sh"
+
+# # Mark ready
+# touch /home/ubuntu/.minikube-ready
+# chown ubuntu:ubuntu /home/ubuntu/.minikube-ready
+
+# echo "=== Setup complete at $(date) ==="
+# EOF
+# }
 provider "aws" {
   region = var.aws_region
 }
@@ -190,6 +197,15 @@ export DEBIAN_FRONTEND=noninteractive
 exec > >(tee -a /var/log/user-data.log) 2>&1
 echo "=== Starting setup at $(date) ==="
 
+# Fix DNS first
+systemctl stop systemd-resolved
+systemctl disable systemd-resolved
+rm -f /etc/resolv.conf
+cat > /etc/resolv.conf <<DNSEOF
+nameserver 8.8.8.8
+nameserver 1.1.1.1
+DNSEOF
+
 # Install dependencies
 apt-get update
 apt-get install -y python3 python3-yaml curl conntrack socat apt-transport-https ca-certificates gnupg lsb-release docker.io jq
@@ -213,6 +229,73 @@ install minikube-linux-amd64 /usr/local/bin/minikube
 mkdir -p /home/ubuntu/app /home/ubuntu/.kube /home/ubuntu/.minikube
 chown -R ubuntu:ubuntu /home/ubuntu
 
+# Create app.py
+cat > /home/ubuntu/app/app.py <<'APPEOF'
+from http.server import HTTPServer, SimpleHTTPRequestHandler
+import os
+
+class MyHandler(SimpleHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/html")
+        self.end_headers()
+        self.wfile.write(b"<h1>Hello from Kubernetes on EC2! (PoC)</h1>")
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
+    server = HTTPServer(("", port), MyHandler)
+    print(f"Server running on port {port}")
+    server.serve_forever()
+APPEOF
+
+# Create Dockerfile
+cat > /home/ubuntu/app/Dockerfile <<'DOCKEREOF'
+FROM python:3.9-slim
+WORKDIR /app
+COPY app.py .
+EXPOSE 8000
+CMD ["python3", "app.py"]
+DOCKEREOF
+
+# Create deployment.yaml
+cat > /home/ubuntu/app/deployment.yaml <<'DEPLOYEOF'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dummy-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dummy-app
+  template:
+    metadata:
+      labels:
+        app: dummy-app
+    spec:
+      containers:
+      - name: dummy-app
+        image: dummy-app:v1
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dummy-app-service
+spec:
+  type: NodePort
+  ports:
+  - port: 8000
+    targetPort: 8000
+    nodePort: 30001
+  selector:
+    app: dummy-app
+DEPLOYEOF
+
+chown -R ubuntu:ubuntu /home/ubuntu/app
+
 # Create Minikube setup script
 cat <<'EOT' > /tmp/minikube-setup.sh
 #!/bin/bash
@@ -225,19 +308,16 @@ export KUBECONFIG=$HOME/.kube/config
 mkdir -p $MINIKUBE_HOME $HOME/.kube
 
 echo "Starting Minikube with docker driver..."
-# Use --apiserver-ips to include the public IP
 PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
 echo "Public IP: $PUBLIC_IP"
 
 minikube start --driver=docker --kubernetes-version=v1.28.0 --memory=2048 --wait=all --wait-timeout=10m --apiserver-ips=$PUBLIC_IP
 
 echo "Setting up port forwarding for API server..."
-# Get the actual API server port from Minikube
 MINIKUBE_IP=$(minikube ip)
 API_PORT=$(kubectl config view -o jsonpath='{.clusters[0].cluster.server}' | grep -oP ':\K[0-9]+')
 echo "Minikube IP: $MINIKUBE_IP, API Port: $API_PORT"
 
-# Forward port 8443 from all interfaces to Minikube
 sudo iptables -t nat -A PREROUTING -p tcp --dport 8443 -j DNAT --to-destination $MINIKUBE_IP:$API_PORT
 sudo iptables -t nat -A POSTROUTING -j MASQUERADE
 
@@ -245,26 +325,30 @@ echo "Verifying cluster..."
 kubectl cluster-info
 kubectl get nodes
 
-# Verify certificate files already exist (Minikube creates them)
-echo "Verifying certificate files..."
-ls -lh $HOME/.minikube/profiles/minikube/client.crt
-ls -lh $HOME/.minikube/profiles/minikube/client.key
-ls -lh $HOME/.minikube/ca.crt
+echo "Building Docker image..."
+cd $HOME/app
+docker build -t dummy-app:v1 .
 
-# Set correct permissions
-chmod 600 $HOME/.minikube/profiles/minikube/client.key
-chmod 644 $HOME/.minikube/profiles/minikube/client.crt
-chmod 644 $HOME/.minikube/ca.crt
+echo "Loading image into Minikube..."
+minikube image load dummy-app:v1
 
-echo "✅ Certificate files are ready"
+echo "Deploying application..."
+kubectl apply -f deployment.yaml
 
-echo "Waiting for Kubernetes system pods..."
-kubectl wait --for=condition=Ready pods --all --all-namespaces --timeout=300s || true
-kubectl get pods --all-namespaces
+echo "Waiting for deployment..."
+sleep 10
+kubectl wait --for=condition=available --timeout=300s deployment/dummy-app || true
 
-chown -R ubuntu:ubuntu $MINIKUBE_HOME $HOME/.kube
+echo "Checking deployment status..."
+kubectl get pods -l app=dummy-app
+kubectl get svc dummy-app-service
+
+echo "Testing application locally..."
+sleep 5
+curl -f http://$MINIKUBE_IP:30001 || echo "App may still be starting..."
 
 echo "✅ Minikube setup complete"
+echo "Application accessible at: http://$PUBLIC_IP:30001"
 EOT
 
 chmod +x /tmp/minikube-setup.sh
