@@ -225,7 +225,8 @@ export KUBECONFIG=$HOME/.kube/config
 mkdir -p $MINIKUBE_HOME $HOME/.kube
 
 echo "Starting Minikube with docker driver..."
-minikube start --driver=docker --kubernetes-version=v1.28.0 --memory=2048 --apiserver-ips=127.0.0.1 --apiserver-name=localhost --wait=all
+# Remove --apiserver-ips and --apiserver-name - they're causing connection issues
+minikube start --driver=docker --kubernetes-version=v1.28.0 --memory=2048 --wait=all --wait-timeout=10m
 
 echo "Verifying cluster..."
 kubectl cluster-info
