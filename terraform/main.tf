@@ -192,7 +192,7 @@ echo "=== Starting setup at $(date) ==="
 
 # Install dependencies
 apt-get update
-apt-get install -y python3 curl conntrack socat apt-transport-https ca-certificates gnupg lsb-release docker.io jq
+apt-get install -y python3 python3-yaml curl conntrack socat apt-transport-https ca-certificates gnupg lsb-release docker.io jq
 
 systemctl enable docker
 systemctl start docker
@@ -235,10 +235,31 @@ kubectl get nodes
 echo "Extracting certificates to files..."
 mkdir -p $HOME/.minikube/profiles/minikube
 
-# Extract using grep and awk to get the base64 data
-grep "client-certificate-data:" $KUBECONFIG | awk '{print $2}' | base64 -d > $HOME/.minikube/profiles/minikube/client.crt
-grep "client-key-data:" $KUBECONFIG | awk '{print $2}' | base64 -d > $HOME/.minikube/profiles/minikube/client.key
-grep "certificate-authority-data:" $KUBECONFIG | awk '{print $2}' | base64 -d > $HOME/.minikube/ca.crt
+# Extract using Python for reliable base64 decoding
+python3 -c "
+import yaml
+import base64
+import sys
+
+with open('$KUBECONFIG', 'r') as f:
+    config = yaml.safe_load(f)
+
+# Extract and decode certificates
+client_cert = config['users'][0]['user']['client-certificate-data']
+client_key = config['users'][0]['user']['client-key-data']
+ca_cert = config['clusters'][0]['cluster']['certificate-authority-data']
+
+with open('$HOME/.minikube/profiles/minikube/client.crt', 'wb') as f:
+    f.write(base64.b64decode(client_cert))
+
+with open('$HOME/.minikube/profiles/minikube/client.key', 'wb') as f:
+    f.write(base64.b64decode(client_key))
+
+with open('$HOME/.minikube/ca.crt', 'wb') as f:
+    f.write(base64.b64decode(ca_cert))
+
+print('Certificates extracted successfully')
+"
 
 # Verify files have content
 echo "Certificate files created:"
