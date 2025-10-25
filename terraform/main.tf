@@ -225,12 +225,40 @@ export KUBECONFIG=$HOME/.kube/config
 mkdir -p $MINIKUBE_HOME $HOME/.kube
 
 echo "Starting Minikube with docker driver..."
-# Remove --apiserver-ips and --apiserver-name - they're causing connection issues
 minikube start --driver=docker --kubernetes-version=v1.28.0 --memory=2048 --wait=all --wait-timeout=10m
 
 echo "Verifying cluster..."
 kubectl cluster-info
 kubectl get nodes
+
+# Extract certificates from kubeconfig and write them to files
+echo "Extracting certificates to files..."
+mkdir -p $HOME/.minikube/profiles/minikube
+
+# Extract using grep and awk to get the base64 data
+grep "client-certificate-data:" $KUBECONFIG | awk '{print $2}' | base64 -d > $HOME/.minikube/profiles/minikube/client.crt
+grep "client-key-data:" $KUBECONFIG | awk '{print $2}' | base64 -d > $HOME/.minikube/profiles/minikube/client.key
+grep "certificate-authority-data:" $KUBECONFIG | awk '{print $2}' | base64 -d > $HOME/.minikube/ca.crt
+
+# Verify files have content
+echo "Certificate files created:"
+ls -lh $HOME/.minikube/profiles/minikube/client.crt
+ls -lh $HOME/.minikube/profiles/minikube/client.key
+ls -lh $HOME/.minikube/ca.crt
+
+# Now update kubeconfig to use file paths instead of embedded data
+kubectl config set-cluster minikube \
+  --certificate-authority=$HOME/.minikube/ca.crt \
+  --embed-certs=false
+
+kubectl config set-credentials minikube \
+  --client-certificate=$HOME/.minikube/profiles/minikube/client.crt \
+  --client-key=$HOME/.minikube/profiles/minikube/client.key \
+  --embed-certs=false
+
+chmod 600 $HOME/.minikube/profiles/minikube/client.key
+chmod 644 $HOME/.minikube/profiles/minikube/client.crt
+chmod 644 $HOME/.minikube/ca.crt
 
 echo "Waiting for Kubernetes system pods..."
 kubectl wait --for=condition=Ready pods --all --all-namespaces --timeout=300s || true
@@ -252,4 +280,8 @@ chown ubuntu:ubuntu /home/ubuntu/.minikube-ready
 
 echo "=== Setup complete at $(date) ==="
 EOF
+}
+
+output "ec2_public_ip" {
+  value = aws_instance.k8s_node.public_ip
 }
